@@ -53,9 +53,18 @@ async fn request_quote(count: u32) -> Result<f64, Box<dyn std::error::Error>> {
     let client = ClientBuilder::new(reqwest::Client::new())
         .with(TracingMiddleware::<SpanBackendWithUrl>::new())
         .build();
+    
+    
+    // Get service name from environment variable
+    let service_name = env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "opentelemetry-demo-shippingservice".to_string());
+
+    // Client-side: Start span and set net.peer.name
+    let span = tracer.start_span("request_quote");
+    span.set_attribute(KeyValue::new("net.peer.name", "opentelemetry-demo-quoteservice"));
 
     let resp = client
         .post(quote_service_addr)
+        .header("X-Service-Name", &service_name)  // Add X-Service-Name header
         .json(&reqbody)
         .send()
         .await?

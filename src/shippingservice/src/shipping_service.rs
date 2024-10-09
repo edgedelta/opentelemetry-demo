@@ -79,6 +79,11 @@ impl ShippingService for ShippingServer {
         span.set_attribute(KeyValue::new(semconv::trace::RPC_SERVICE, RPC_SERVICE_SHIPPING));
         span.set_attribute(KeyValue::new(semconv::trace::RPC_METHOD, "GetQuote"));
 
+        // Server-Side: Extract X-Service-Name from the metadata
+        if let Some(client_service_name) = request.metadata().get("X-Service-Name") {
+            span.set_attribute(KeyValue::new("net.peer.name", client_service_name.to_str().unwrap_or("")));
+        }
+
         span.add_event("Processing get quote request".to_string(), vec![]);
         span.set_attribute(KeyValue::new(
             "app.shipping.zip_code",
