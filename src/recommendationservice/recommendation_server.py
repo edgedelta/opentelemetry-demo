@@ -44,6 +44,12 @@ class RecommendationService(demo_pb2_grpc.RecommendationServiceServicer):
         prod_list = get_product_list(request.product_ids)
         span = trace.get_current_span()
         span.set_attribute("app.products_recommended.count", len(prod_list))
+        
+        # Extracting X-Service-Name from the metadata (client request headers)
+        md = dict(context.invocation_metadata())
+        if 'X-Service-Name' in md:
+            span.set_attribute("net.peer.name", md['X-Service-Name'])
+        
         logger.info(f"Receive ListRecommendations for product ids:{prod_list}")
 
         # build and return response
@@ -68,6 +74,10 @@ def get_product_list(request_product_ids):
     global first_run
     global cached_ids
     with tracer.start_as_current_span("get_product_list") as span:
+         # Add X-Service-Name to outgoing request headers
+        service_name = os.getenv("OTEL_SERVICE_NAME", "opentelemetry-demo-recommendationservice")
+        span.set_attribute("net.peer.name", "opentelemetry-demo-productcatalogservice")
+        
         max_responses = 5
 
         # Formulate the list of characters to list of strings
@@ -81,7 +91,7 @@ def get_product_list(request_product_ids):
                 first_run = False
                 span.set_attribute("app.cache_hit", False)
                 logger.info("get_product_list: cache miss")
-                cat_response = product_catalog_stub.ListProducts(demo_pb2.Empty())
+                cat_response = product_catalog_stub.ListProducts(demo_pb2.Empty(), metadata=[('X-Service-Name', service_name)])
                 response_ids = [x.id for x in cat_response.products]
                 cached_ids = cached_ids + response_ids
                 cached_ids = cached_ids + cached_ids[:len(cached_ids) // 4]
