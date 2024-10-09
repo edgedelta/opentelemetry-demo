@@ -53,6 +53,13 @@ return function (App $app) {
         $span = Span::getCurrent();
         $span->addEvent('Received get quote request, processing it');
 
+        // Extract X-Service-Name
+        $clientServiceName = $request->getHeaderLine('X-Service-Name');
+        if (!empty($clientServiceName)) {
+            // Add net.peer.name if X-Service-Name is found
+            $span->setAttribute('net.peer.name', $clientServiceName);
+        }
+
         $jsonObject = $request->getParsedBody();
 
         $data = calculateQuote($jsonObject);
