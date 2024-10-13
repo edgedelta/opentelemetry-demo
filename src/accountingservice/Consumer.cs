@@ -4,6 +4,7 @@
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
 using Oteldemo;
+using OpenTelemetry.Trace;
 
 namespace AccountingService;
 
@@ -40,8 +41,35 @@ internal class Consumer : IDisposable
                 {
                     var consumeResult = _consumer.Consume();
 
-                    ProcessMessage(consumeResult.Message);
-                }
+                    // Extract the X-Service-Name from the OTEL_SERVICE_NAME environment variable
+                    // Default to "opentelemetry-demo-accountingservice" if not set
+                    var serviceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME")
+                        ?? $"opentelemetry-demo-accountingservice";
+
+                    // Start a new OpenTelemetry span for processing each message
+                    using (var tracer = Sdk.CreateTracerProviderBuilder().Build().GetTracer("accountingservice"))
+                    {
+                        var span = tracer.StartActiveSpan("kafka.consume");
+                        span.SetAttribute("net.peer.name", "opentelemetry-demo-kafka");
+                        try
+                        {
+                            // Adding X-Service-Name to the Kafka message headers
+                            consumeResult.Message.Headers.Add(new Header("X-Service-Name", System.Text.Encoding.UTF8.GetBytes(serviceName)));
+
+                            ProcessMessage(consumeResult.Message);
+                        }
+                        catch (Exception ex)
+                        {
+                            span.RecordException(ex);
+                            throw;
+                        }
+                        finally
+                        {
+                            span.End();
+                        }
+
+                        ProcessMessage(consumeResult.Message);
+                    }
                 catch (ConsumeException e)
                 {
                     _logger.LogError(e, "Consume error: {0}", e.Error.Reason);
