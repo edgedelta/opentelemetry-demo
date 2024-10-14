@@ -4,7 +4,9 @@
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
 using Oteldemo;
+using OpenTelemetry;
 using OpenTelemetry.Trace;
+using OpenTelemetry.Resources;
 
 namespace AccountingService;
 
@@ -16,6 +18,9 @@ internal class Consumer : IDisposable
     private IConsumer<string, byte[]> _consumer;
     private bool _isListening;
 
+    private readonly TracerProvider _tracerProvider;
+    private readonly Tracer _tracer;
+
     public Consumer(ILogger<Consumer> logger)
     {
         _logger = logger;
@@ -25,6 +30,16 @@ internal class Consumer : IDisposable
 
         _consumer = BuildConsumer(servers);
         _consumer.Subscribe(TopicName);
+
+        // Setup OpenTelemetry Tracing
+        _tracerProvider = Sdk.CreateTracerProviderBuilder()
+            .AddSource("accountingservice")
+            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("accountingservice"))
+            .AddConsoleExporter()  // Add other exporters as needed (OTLP, Jaeger, etc.)
+            .Build();
+
+        // Initialize _tracer
+        _tracer = _tracerProvider.GetTracer("accountingservice");
 
         _logger.LogInformation($"Connecting to Kafka: {servers}");
     }
@@ -44,32 +59,29 @@ internal class Consumer : IDisposable
                     // Extract the X-Service-Name from the OTEL_SERVICE_NAME environment variable
                     // Default to "opentelemetry-demo-accountingservice" if not set
                     var serviceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME")
-                        ?? $"opentelemetry-demo-accountingservice";
+                        ?? "opentelemetry-demo-accountingservice";
 
                     // Start a new OpenTelemetry span for processing each message
-                    using (var tracer = Sdk.CreateTracerProviderBuilder().Build().GetTracer("accountingservice"))
+                    using (var span = _tracer.StartActiveSpan("kafka.consume"))
                     {
-                        var span = tracer.StartActiveSpan("kafka.consume");
                         span.SetAttribute("net.peer.name", "opentelemetry-demo-kafka");
+
                         try
                         {
                             // Adding X-Service-Name to the Kafka message headers
                             consumeResult.Message.Headers.Add(new Header("X-Service-Name", System.Text.Encoding.UTF8.GetBytes(serviceName)));
-
-                            ProcessMessage(consumeResult.Message);
                         }
                         catch (Exception ex)
                         {
                             span.RecordException(ex);
-                            throw;
-                        }
-                        finally
-                        {
-                            span.End();
                         }
 
+                        // Process the Kafka message
                         ProcessMessage(consumeResult.Message);
+
+                        span.End(); // Explicitly end the span
                     }
+                }
                 catch (ConsumeException e)
                 {
                     _logger.LogError(e, "Consume error: {0}", e.Error.Reason);
