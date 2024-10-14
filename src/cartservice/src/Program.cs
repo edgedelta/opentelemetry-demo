@@ -18,6 +18,8 @@ using OpenTelemetry.Trace;
 using OpenFeature;
 using OpenFeature.Contrib.Providers.Flagd;
 using OpenFeature.Contrib.Hooks.Otel;
+using OpenTelemetry;
+
 
 var builder = WebApplication.CreateBuilder(args);
 string valkeyAddress = builder.Configuration["VALKEY_ADDR"];
@@ -31,27 +33,38 @@ builder.Logging
     .AddOpenTelemetry(options => options.AddOtlpExporter())
     .AddConsole();
 
-builder.Services.AddSingleton<ICartStore>(x=>
+builder.Services.AddSingleton<ICartStore>(x =>
 {
     var store = new ValkeyCartStore(x.GetRequiredService<ILogger<ValkeyCartStore>>(), valkeyAddress);
     store.Initialize();
     return store;
 });
 
-builder.Services.AddSingleton<IFeatureClient>(x => {
+builder.Services.AddSingleton<IFeatureClient>(x =>
+{
     var flagdProvider = new FlagdProvider();
     Api.Instance.SetProviderAsync(flagdProvider).GetAwaiter().GetResult();
     var client = Api.Instance.GetClient();
     return client;
 });
 
+// Setup OpenTelemetry Tracing
+var tracerProvider = Sdk.CreateTracerProviderBuilder()
+    .AddAspNetCoreInstrumentation()
+    .AddHttpClientInstrumentation()
+    .AddOtlpExporter()
+    .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("cartservice"))
+    .Build();
+
+var tracer = tracerProvider.GetTracer("cartservice");
+
+// Update CartService instantiation to pass Tracer
 builder.Services.AddSingleton(x =>
     new CartService(
         x.GetRequiredService<ICartStore>(),
         new ValkeyCartStore(x.GetRequiredService<ILogger<ValkeyCartStore>>(), "badhost:1234"),
         x.GetRequiredService<IFeatureClient>()
-));
-
+    ));
 
 Action<ResourceBuilder> appResourceBuilder =
     resource => resource
@@ -72,18 +85,41 @@ builder.Services.AddOpenTelemetry()
         .AddRuntimeInstrumentation()
         .AddAspNetCoreInstrumentation()
         .AddOtlpExporter());
+
 OpenFeature.Api.Instance.AddHooks(new TracingHook());
+
 builder.Services.AddGrpc();
 builder.Services.AddGrpcHealthChecks()
     .AddCheck("Sample", () => HealthCheckResult.Healthy());
 
 var app = builder.Build();
 
-var ValkeyCartStore = (ValkeyCartStore) app.Services.GetRequiredService<ICartStore>();
+var ValkeyCartStore = (ValkeyCartStore)app.Services.GetRequiredService<ICartStore>();
 app.Services.GetRequiredService<StackExchangeRedisInstrumentation>().AddConnection(ValkeyCartStore.GetConnection());
 
-app.MapGrpcService<CartService>()
-   .AddInterceptor(new ServiceNameInterceptor());
+// Server-side logic to extract X-Service-Name from incoming requests
+app.Use(async (context, next) =>
+{
+    var span = tracer.StartActiveSpan("request.process");
+    try
+    {
+        // Extract X-Service-Name from headers
+        var serviceName = context.Request.Headers["X-Service-Name"].ToString();
+        if (!string.IsNullOrEmpty(serviceName))
+        {
+            // Attach X-Service-Name to the current span
+            span.SetAttribute("net.peer.name", serviceName);
+        }
+
+        await next();
+    }
+    finally
+    {
+        span.End();
+    }
+});
+
+app.MapGrpcService<CartService>();
 app.MapGrpcHealthChecksService();
 
 app.MapGet("/", async context =>
