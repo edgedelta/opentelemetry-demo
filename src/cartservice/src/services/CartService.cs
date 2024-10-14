@@ -8,6 +8,9 @@ using OpenTelemetry.Trace;
 using cartservice.cartstore;
 using OpenFeature;
 using Oteldemo;
+using Microsoft.AspNetCore.Http;
+using System.Net.Http;
+
 
 namespace cartservice.services;
 
@@ -26,12 +29,37 @@ public class CartService : Oteldemo.CartService.CartServiceBase
         _featureFlagHelper = featureFlagService;
     }
 
+    // Server-side: Extract X-Service-Name from incoming request and add to span
+    public void AddServiceNameToSpan(HttpContext context)
+    {
+        var serviceName = context.Request.Headers["X-Service-Name"].ToString();
+        if (!string.IsNullOrEmpty(serviceName))
+        {
+            var activity = Activity.Current;
+            activity?.SetTag("net.peer.name", serviceName);
+        }
+    }
+
+    // Client-side: Add X-Service-Name to outgoing request headers
+    public HttpClient AddClientServiceName(HttpClient client, string serviceName)
+    {
+        if (string.IsNullOrEmpty(serviceName))
+        {
+            serviceName = "opentelemetry-demo-cartservice";
+        }
+
+        client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);
+        return client;
+    }
+
     public override async Task<Empty> AddItem(AddItemRequest request, ServerCallContext context)
     {
         var activity = Activity.Current;
         activity?.SetTag("app.user.id", request.UserId);
         activity?.SetTag("app.product.id", request.Item.ProductId);
         activity?.SetTag("app.product.quantity", request.Item.Quantity);
+
+        AddServiceNameToSpan(context.GetHttpContext());
 
         await _cartStore.AddItemAsync(request.UserId, request.Item.ProductId, request.Item.Quantity);
         return Empty;
@@ -40,6 +68,8 @@ public class CartService : Oteldemo.CartService.CartServiceBase
     public override async Task<Cart> GetCart(GetCartRequest request, ServerCallContext context)
     {
         var activity = Activity.Current;
+        AddServiceNameToSpan(context.GetHttpContext());
+
         activity?.SetTag("app.user.id", request.UserId);
         activity?.AddEvent(new("Fetch cart"));
 
@@ -57,6 +87,8 @@ public class CartService : Oteldemo.CartService.CartServiceBase
     public override async Task<Empty> EmptyCart(EmptyCartRequest request, ServerCallContext context)
     {
         var activity = Activity.Current;
+        AddServiceNameToSpan(context.GetHttpContext());
+
         activity?.SetTag("app.user.id", request.UserId);
         activity?.AddEvent(new("Empty cart"));
 
