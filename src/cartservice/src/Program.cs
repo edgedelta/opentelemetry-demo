@@ -109,6 +109,9 @@ app.Use(async (context, next) =>
         {
             // Attach X-Service-Name to the current span
             span.SetAttribute("net.peer.name", serviceName);
+
+            // add logging here
+            Console.WriteLine($"Service name: {serviceName} added to span as net.peer.name");
         }
 
         await next();

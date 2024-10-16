@@ -37,20 +37,11 @@ public class CartService : Oteldemo.CartService.CartServiceBase
         {
             var activity = Activity.Current;
             activity?.SetTag("net.peer.name", serviceName);
+
+            Console.WriteLine($"Service name: {serviceName} added to span as net.peer.name");
         }
     }
 
-    // Client-side: Add X-Service-Name to outgoing request headers
-    public HttpClient AddClientServiceName(HttpClient client, string serviceName)
-    {
-        if (string.IsNullOrEmpty(serviceName))
-        {
-            serviceName = "opentelemetry-demo-cartservice";
-        }
-
-        client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);
-        return client;
-    }
 
     public override async Task<Empty> AddItem(AddItemRequest request, ServerCallContext context)
     {

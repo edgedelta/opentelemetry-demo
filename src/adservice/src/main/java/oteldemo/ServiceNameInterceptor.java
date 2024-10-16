@@ -4,8 +4,10 @@ import io.grpc.*;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Scope;
+import org.apache.logging.log4j.*;
 
 public class ServiceNameInterceptor implements ServerInterceptor {
+    private static final Logger logger = LogManager.getLogger(ServiceNameInterceptor.class);
 
     private static final String ATTRIBUTE_NET_PEER_NAME = "net.peer.name";
 
@@ -19,6 +21,7 @@ public class ServiceNameInterceptor implements ServerInterceptor {
         String clientServiceName = headers.get(X_SERVICE_NAME_KEY);
         Span span = Span.current();
         if (clientServiceName != null && !clientServiceName.isEmpty()) {
+            logger.debug("Received client service name: {} and added as net.peer.name", clientServiceName);
             span.setAttribute(ATTRIBUTE_NET_PEER_NAME, clientServiceName);
         }
 
