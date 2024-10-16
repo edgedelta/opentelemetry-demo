@@ -418,7 +418,7 @@ func addClientServiceNameInterceptor(svcAddr string) grpc.UnaryClientInterceptor
 			attribute.String("net.peer.name", netPeerName), // Set net.peer.name with formatted hostname
 		)
 
-		log.Info("Added X-Service-Name: %q and net.peer.name: %q to outgoing gRPC metadata", serviceName, netPeerName)
+		log.Infof("Added X-Service-Name: %q and net.peer.name: %q to outgoing gRPC metadata", serviceName, netPeerName)
 
 		// Proceed with the gRPC call
 		return invoker(ctx, method, req, reply, cc, opts...)
